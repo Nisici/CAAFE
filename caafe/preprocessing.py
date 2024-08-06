@@ -2,7 +2,7 @@ import pandas as pd
 import copy
 import numpy as np
 from typing import Dict, Optional, Tuple
-
+from sklearn.preprocessing import LabelEncoder
 
 def create_mappings(df_train: pd.DataFrame) -> Dict[str, Dict[int, str]]:
     """
@@ -73,13 +73,18 @@ def make_dataset_numeric(df: pd.DataFrame, mappings: Dict[str, Dict[int, str]]) 
     Returns:
     pandas.DataFrame: The converted dataframe.
     """
-    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.replace([np.inf, -np.inf], np.nan).dropna()
+    le = LabelEncoder()
+    for col in df.select_dtypes(include=['object']).columns:
+        df[col] = le.fit_transform(df[col])
+    """
     df = df.apply(
         lambda col: convert_categorical_to_integer_f(
             col, mapping=mappings.get(col.name)
         ),
         axis=0,
     )
+    """
     df = df.astype(float)
 
     return df

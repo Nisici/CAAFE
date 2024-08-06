@@ -3,6 +3,8 @@ import numpy as np
 from .preprocessing import convert_categorical_to_integer_f
 from typing import Any, Dict, Optional
 import pandas as pd
+from math import radians, sin, cos, sqrt, atan2
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 def run_llm_code(code: str, df: pd.DataFrame, convert_categorical_to_integer: Optional[bool] = True, fill_na: Optional[bool] = True) -> pd.DataFrame:
     """
@@ -169,6 +171,13 @@ def check_ast(node: ast.AST) -> None:
         "range": range,
         "sorted": sorted,
         "reversed": reversed,
+        "cos": cos,
+        "sin": sin,
+        "sqrt": sqrt,
+        "StandardScaler": StandardScaler,
+        "MinMaxScaler": MinMaxScaler,
+        "radians": radians,
+        "atan2": atan2
         # Add other functions you want to allow here.
     }
 
@@ -318,7 +327,14 @@ def check_ast(node: ast.AST) -> None:
         "dt",
         "cat",
         "sparse",
-        "plot"
+        "plot",
+        'to_datetime',
+        "fit_transform",
+        "sin",
+        "cos",
+        "pi",
+        "skew",
+        "get"
         # Add other DataFrame methods you want to allow here.
     }
 

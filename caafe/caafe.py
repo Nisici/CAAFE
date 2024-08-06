@@ -1,7 +1,8 @@
 import copy
 import numpy as np
-
+from preprocessing import make_dataset_numeric
 import openai
+from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import RepeatedKFold
 from .caafe_evaluate import (
     evaluate_dataset,
@@ -143,90 +144,59 @@ def generate_features(
         return code
 
     def execute_and_evaluate_code_block(full_code, code):
-        old_accs, old_rocs, accs, rocs = [], [], [], []
+        df_train = df
 
-        ss = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
-        for (train_idx, valid_idx) in ss.split(df):
-            df_train, df_valid = df.iloc[train_idx], df.iloc[valid_idx]
+        # Remove target column from df_train
+        target_train = df_train.iloc[:, -1]
+        df_train = df_train.drop(df_train.columns[-1], axis=1)
 
-            # Remove target column from df_train
-            target_train = df_train[ds[4][-1]]
-            target_valid = df_valid[ds[4][-1]]
-            df_train = df_train.drop(columns=[ds[4][-1]])
-            df_valid = df_valid.drop(columns=[ds[4][-1]])
-
-            df_train_extended = copy.deepcopy(df_train)
-            df_valid_extended = copy.deepcopy(df_valid)
-
+        df_train_extended = copy.deepcopy(df_train)
+        try:
+            df_train = run_llm_code(
+                full_code,
+                df_train,
+                convert_categorical_to_integer=not ds[0].startswith("kaggle"),
+            )
+            df_train_extended = run_llm_code(
+                full_code + "\n" + code,
+                df_train_extended,
+                convert_categorical_to_integer=not ds[0].startswith("kaggle"),
+            )
+        except Exception as e:
+            display_method(f"Error in code execution. {type(e)} {e}")
+            display_method(f"```python\n{format_for_display(code)}\n```\n")
+            return e, None, None, None, None
+        # Add target column back to df_train
+        try:
+            df_train = make_dataset_numeric(df_train, None)
+            df_train_extended = make_dataset_numeric(df_train_extended, None)
+        except Exception as e:
+            display_method(f"Error in code execution. {type(e)} {e}")
+            display_method(f"```python\n{format_for_display(code)}\n```\n")
+            return e, None, None, None, None
+        x_old = df_train
+        x_extended = df_train_extended
+        index_to_keep_ext = x_extended.index
+        index_to_keep_old = x_old.index
+        # Select corresponding rows in y
+        y_old = target_train.loc[index_to_keep_old]
+        y_extended = target_train.loc[index_to_keep_ext]
+        import sys, os
+        with open(os.devnull, "w") as devnull:
+            old_stdout = sys.stdout
+            sys.stdout = devnull
             try:
-                df_train = run_llm_code(
-                    full_code,
-                    df_train,
-                    convert_categorical_to_integer=not ds[0].startswith("kaggle"),
-                )
-                df_valid = run_llm_code(
-                    full_code,
-                    df_valid,
-                    convert_categorical_to_integer=not ds[0].startswith("kaggle"),
-                )
-                df_train_extended = run_llm_code(
-                    full_code + "\n" + code,
-                    df_train_extended,
-                    convert_categorical_to_integer=not ds[0].startswith("kaggle"),
-                )
-                df_valid_extended = run_llm_code(
-                    full_code + "\n" + code,
-                    df_valid_extended,
-                    convert_categorical_to_integer=not ds[0].startswith("kaggle"),
-                )
-
-            except Exception as e:
-                display_method(f"Error in code execution. {type(e)} {e}")
-                display_method(f"```python\n{format_for_display(code)}\n```\n")
-                return e, None, None, None, None
-
-            # Add target column back to df_train
-            df_train[ds[4][-1]] = target_train
-            df_valid[ds[4][-1]] = target_valid
-            df_train_extended[ds[4][-1]] = target_train
-            df_valid_extended[ds[4][-1]] = target_valid
-
-            from contextlib import contextmanager
-            import sys, os
-
-            with open(os.devnull, "w") as devnull:
-                old_stdout = sys.stdout
-                sys.stdout = devnull
-                try:
-                    result_old = evaluate_dataset(
-                        df_train=df_train,
-                        df_test=df_valid,
-                        prompt_id="XX",
-                        name=ds[0],
-                        method=iterative_method,
-                        metric_used=metric_used,
-                        seed=0,
-                        target_name=ds[4][-1],
-                    )
-
-                    result_extended = evaluate_dataset(
-                        df_train=df_train_extended,
-                        df_test=df_valid_extended,
-                        prompt_id="XX",
-                        name=ds[0],
-                        method=iterative_method,
-                        metric_used=metric_used,
-                        seed=0,
-                        target_name=ds[4][-1],
-                    )
-                finally:
-                    sys.stdout = old_stdout
-
-            old_accs += [result_old["roc"]]
-            old_rocs += [result_old["acc"]]
-            accs += [result_extended["roc"]]
-            rocs += [result_extended["acc"]]
-        return None, rocs, accs, old_rocs, old_accs
+                result_old = cross_val_score(iterative_method, x_old.to_numpy(), y_old.to_numpy(), cv=10, scoring='r2',
+                                             n_jobs=6)
+                result_extended = cross_val_score(iterative_method, x_extended.to_numpy(), y_extended.to_numpy(), cv=10,
+                                                  scoring='r2', n_jobs=6)
+            finally:
+                sys.stdout = old_stdout
+            old_r2 = np.mean(result_old)
+            old_std = np.std(result_old)
+            r2 = np.mean(result_extended)
+            std = np.std(result_extended)
+        return None, r2, std, old_r2, old_std
 
     messages = [
         {
@@ -251,7 +221,7 @@ def generate_features(
             display_method("Error in LLM API." + str(e))
             continue
         i = i + 1
-        e, rocs, accs, old_rocs, old_accs = execute_and_evaluate_code_block(
+        e, r2, std, old_r2, old_std = execute_and_evaluate_code_block(
             full_code, code
         )
         if e is not None:
@@ -260,8 +230,8 @@ def generate_features(
                 {
                     "role": "user",
                     "content": f"""Code execution failed with error: {type(e)} {e}.\n Code: ```python{code}```\n Generate next feature (fixing error?):
-                                ```python
-                                """,
+                                    ```python
+                                    """,
                 },
             ]
             continue
@@ -275,22 +245,22 @@ def generate_features(
         # )
         # """ROC Improvement by using each feature: {importances}"""
 
-        improvement_roc = np.nanmean(rocs) - np.nanmean(old_rocs)
-        improvement_acc = np.nanmean(accs) - np.nanmean(old_accs)
+        improvement_r2 = np.nanmean(r2) - np.nanmean(old_r2)
+        improvement_std = np.nanmean(std) - np.nanmean(old_std)
 
         add_feature = True
         add_feature_sentence = "The code was executed and changes to ´df´ were kept."
-        if improvement_roc + improvement_acc <= 0:
+        if improvement_r2 < 0:
             add_feature = False
-            add_feature_sentence = f"The last code changes to ´df´ were discarded. (Improvement: {improvement_roc + improvement_acc})"
+            add_feature_sentence = f"The last code changes to ´df´ were discarded. (Improvement: {improvement_r2})"
 
         display_method(
             "\n"
             + f"*Iteration {i}*\n"
             + f"```python\n{format_for_display(code)}\n```\n"
-            + f"Performance before adding features ROC {np.nanmean(old_rocs):.3f}, ACC {np.nanmean(old_accs):.3f}.\n"
-            + f"Performance after adding features ROC {np.nanmean(rocs):.3f}, ACC {np.nanmean(accs):.3f}.\n"
-            + f"Improvement ROC {improvement_roc:.3f}, ACC {improvement_acc:.3f}.\n"
+            + f"Performance before adding features R2 {np.nanmean(old_r2):.3f}, STD {np.nanmean(old_std):.3f}.\n"
+            + f"Performance after adding features R2 {np.nanmean(r2):.3f}, STD {np.nanmean(std):.3f}.\n"
+            + f"Improvement R2 {improvement_r2:.3f}, STD {improvement_std:.3f}.\n"
             + f"{add_feature_sentence}\n"
             + f"\n"
         )
@@ -300,9 +270,9 @@ def generate_features(
                 {"role": "assistant", "content": code},
                 {
                     "role": "user",
-                    "content": f"""Performance after adding feature ROC {np.nanmean(rocs):.3f}, ACC {np.nanmean(accs):.3f}. {add_feature_sentence}
-Next codeblock:
-""",
+                    "content": f"""Performance after adding feature R2 {np.nanmean(r2):.3f}, STD {np.nanmean(std):.3f}. {add_feature_sentence}
+    Next codeblock:
+    """,
                 },
             ]
         if add_feature:
