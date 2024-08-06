@@ -1,6 +1,6 @@
 import copy
 import numpy as np
-from preprocessing import make_dataset_numeric
+from .preprocessing import make_dataset_numeric
 import openai
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import RepeatedKFold
