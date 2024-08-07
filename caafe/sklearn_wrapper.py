@@ -147,9 +147,7 @@ class CAAFEClassifier(BaseEstimator, ClassifierMixin):
             df_train,
         )
 
-        df_train, _, self.mappings = make_datasets_numeric(
-            df_train, df_test=None, target_column=target_name, return_mappings=True
-        )
+        df_train = make_dataset_numeric(df_train)
 
         df_train, y = split_target_column(df_train, target_name)
 
