@@ -1,4 +1,5 @@
-# CAAFE
+# CAAFE for Regression
+## This fork makes CAAFE working for regression task using XGBRegressor
 CAAFE lets you semi-automate your feature engineering process based on your explanations on the dataset and with the help of language models.
 It is based on the paper [LLMs for Semi-Automated Data Science: Introducing CAAFE for Context-Aware Automated Feature Engineering" by Hollmann, Müller, and Hutter (2023)](https://arxiv.org/pdf/2305.03403.pdf).
 CAAFE is developed as part of [Prior Labs](http://priorlabs.ai).
